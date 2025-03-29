@@ -1,0 +1,13 @@
+feedparser==6.0.10
+requests==2.31.0
+beautifulsoup4==4.12.2
+sentence-transformers==2.2.2
+pandas==2.1.4
+nltk==3.8.1
+chromadb==0.4.22
+networkx==3.2.1
+spacy==3.7.2
+python-dotenv==1.0.0
+loguru==0.7.2
+pytest==7.4.3
+jupyter==1.0.0 
