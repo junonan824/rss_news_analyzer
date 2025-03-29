@@ -52,6 +52,66 @@ docker-compose logs -f
 - ChromaDB 벡터 데이터베이스
 - Neo4j 그래프 데이터베이스
 
+## 프로젝트 구조
+
+프로젝트는 다음과 같은 구조로 구성되어 있습니다:
+
+```
+rss_news_analyzer/
+│
+├── src/
+│   ├── __init__.py
+│   ├── app.py
+│   │
+│   ├── rss_fetch/                    # RSS 피드 수집 모듈
+│   │   ├── __init__.py
+│   │   └── rss_fetch.py
+│   │
+│   ├── embeddings/                   # 벡터 임베딩 모듈
+│   │   ├── __init__.py
+│   │   ├── embedding.py
+│   │   └── vector_db.py
+│   │
+│   ├── knowledge_graph/              # 지식 그래프 모듈
+│   │   ├── __init__.py
+│   │   ├── entity_extractor.py
+│   │   ├── graph_builder.py
+│   │   └── export_to_neo4j.py
+│   │
+│   ├── visualization/                # 시각화 모듈 (새로 추가)
+│   │   ├── __init__.py
+│   │   ├── embedding_visualizer.py   # (이전 visualize_embeddings.py)
+│   │   └── search_visualizer.py      # (이전 vector_search_demo.py)
+│   │
+│   └── utils/                        # 유틸리티 함수 (새로 추가)
+│       ├── __init__.py
+│       ├── file_utils.py             # 파일 처리 유틸리티
+│       └── logging_utils.py          # 로깅 유틸리티
+│
+├── scripts/                          # 실행 스크립트 (새로 추가)
+│   ├── run_rss_fetch.py              # RSS 피드 수집 실행
+│   ├── run_embedding.py              # 임베딩 생성 실행
+│   ├── run_graph_builder.py          # 그래프 구축 실행
+│   └── run_visualization.py          # 시각화 실행
+│
+├── data/                             # 데이터 저장 (기존 그대로)
+│
+├── tests/                            # 테스트 (기존 그대로)
+│
+└── configs/                          # 설정 파일 (새로 추가)
+    ├── app_config.json               # 애플리케이션 설정
+    ├── embedding_config.json         # 임베딩 모델 설정
+    └── neo4j_config.json             # Neo4j 연결 설정
+```
+
+### 주요 모듈 설명
+
+- **rss_fetch**: RSS 피드에서 데이터를 수집하고 JSON 형식으로 저장
+- **embeddings**: 텍스트 임베딩을 생성하고 ChromaDB에 저장/검색
+- **knowledge_graph**: 개체 추출, 그래프 구축, Neo4j 연동
+- **visualization**: 임베딩 시각화 및 벡터 검색 결과 시각화
+- **utils**: 공통 유틸리티 함수
+
 ## 임베딩 & 검색 사용 방법
 
 ### 텍스트 임베딩 생성
