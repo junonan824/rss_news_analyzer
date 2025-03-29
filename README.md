@@ -35,6 +35,30 @@ python -m spacy download en_core_web_sm
 python -m spacy download ko_core_news_sm
 ```
 
+4. 환경 변수 설정:
+```bash
+# .env.example 파일을 복사하여 .env 파일 생성
+cp .env.example .env
+
+# .env 파일 편집하여 API 키 설정
+# OPENAI_API_KEY=your_api_key_here
+# DEFAULT_PROVIDER=openai
+# DEFAULT_MODEL=gpt-3.5-turbo
+```
+
+5. Docker를 사용할 경우 환경 변수 설정:
+```bash
+# docker-compose.yml 파일의 app 서비스에 다음 환경 변수 추가
+environment:
+  - OPENAI_API_KEY=${OPENAI_API_KEY}
+  - DEFAULT_PROVIDER=${DEFAULT_PROVIDER}
+  - DEFAULT_MODEL=${DEFAULT_MODEL}
+  
+# 또는 .env 파일을 볼륨으로 마운트
+volumes:
+  - ./.env:/app/.env
+```
+
 ### Docker를 사용한 설치
 
 전체 시스템을 Docker를 사용하여 설치하고 실행할 수 있습니다:
@@ -382,6 +406,28 @@ curl "http://localhost:8000/status"
 curl "http://localhost:8000/search?query=climate%20change&num_results=5"
 ```
 
+#### 텍스트 생성 (단순 생성)
+
+```bash
+curl -X POST "http://localhost:8000/generate-content" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "인공지능의 미래에 대해 설명해주세요.", "provider": "openai", "model": "gpt-3.5-turbo", "max_tokens": 500}'
+```
+
+#### RAG(Retrieval-Augmented Generation) 사용
+
+```bash
+# 먼저 RSS 피드를 처리하여 벡터 DB에 데이터 저장
+curl -X POST "http://localhost:8000/feed/process" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://feeds.bbci.co.uk/news/world/rss.xml"}'
+
+# 검색 결과를 바탕으로 요약 생성
+curl -X POST "http://localhost:8000/generate-summary-of-search" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "최신 뉴스 요약", "num_results": 5}'
+```
+
 #### 그래프 통계
 
 ```bash
@@ -486,6 +532,11 @@ Docker에서는 데이터가 볼륨에 저장되어 컨테이너가 재시작되
 - spaCy를 이용한 개체명 인식(NER)
 - NetworkX 기반의 지식 그래프 구축
 - Neo4j를 이용한 그래프 데이터 탐색
+- OpenAI 또는 HuggingFace 모델을 사용한 텍스트 생성
+- RAG(Retrieval-Augmented Generation) 파이프라인 구현
+  - 질문에 맞는 관련 문서 검색
+  - 검색된 문서를 바탕으로 정확한 답변 생성
+  - 데이터에 없는 내용에 대해서는 정직하게 모름을 표현
 - 그래프 분석 및 시각화
 - FastAPI 기반 웹 API 제공
 - Docker 컨테이너화 지원
