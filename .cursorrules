@@ -1,0 +1,109 @@
+{
+  "projectName": "RSS 피드 처리 및 분석 프로젝트",
+  "description": "이 프로젝트는 RSS 피드에서 데이터를 수집하고, 임베딩을 생성하여 지식 그래프로 분석하는 기능을 제공합니다. 또한 RAG(Retrieval-Augmented Generation) 기능을 통해 수집된 데이터를 기반으로 질문에 대한 답변을 생성합니다.",
+  "projectStructure": {
+    "src": {
+      "description": "소스 코드 디렉토리",
+      "children": {
+        "__init__.py": "패키지 초기화 파일",
+        "app.py": "FastAPI 웹 애플리케이션",
+        "main.py": "CLI 메인 실행 파일",
+        "cli.py": "텍스트 생성 CLI 인터페이스",
+        "rss_fetch": {
+          "description": "RSS 피드 수집 모듈",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "rss_fetch.py": "RSS 피드 수집 기능"
+          }
+        },
+        "embeddings": {
+          "description": "벡터 임베딩 모듈",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "embedding.py": "텍스트 임베딩 생성 기능",
+            "vector_db.py": "ChromaDB 벡터 저장 및 검색"
+          }
+        },
+        "generation": {
+          "description": "텍스트 생성 모듈",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "generation.py": "OpenAI/HuggingFace 텍스트 생성"
+          }
+        },
+        "knowledge_graph": {
+          "description": "지식 그래프 모듈",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "entity_extractor.py": "개체명 인식(NER)",
+            "graph_builder.py": "지식 그래프 구축",
+            "export_to_neo4j.py": "Neo4j 내보내기"
+          }
+        },
+        "visualization": {
+          "description": "시각화 모듈",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "embedding_visualizer.py": "임베딩 시각화",
+            "search_visualizer.py": "벡터 검색 결과 시각화"
+          }
+        },
+        "utils": {
+          "description": "유틸리티 함수",
+          "children": {
+            "__init__.py": "패키지 초기화 파일",
+            "file_utils.py": "파일 처리 유틸리티",
+            "logging_utils.py": "로깅 유틸리티"
+          }
+        }
+      }
+    },
+    "scripts": {
+      "description": "실행 스크립트",
+      "children": {
+        "run_rss_fetch.py": "RSS 피드 수집 실행",
+        "run_embedding.py": "임베딩 생성 실행",
+        "run_graph_builder.py": "그래프 구축 실행",
+        "run_visualization.py": "시각화 실행"
+      }
+    },
+    "data": "데이터 저장 디렉토리",
+    "tests": "테스트 디렉토리",
+    "configs": {
+      "description": "설정 파일",
+      "children": {
+        "app_config.json": "애플리케이션 설정",
+        "embedding_config.json": "임베딩 모델 설정",
+        "neo4j_config.json": "Neo4j 연결 설정"
+      }
+    },
+    ".env.example": "환경 변수 예시 파일",
+    ".env": "환경 변수 파일 (API 키 포함)",
+    "requirements.txt": "의존성 목록",
+    "README.md": "프로젝트 설명 문서"
+  },
+  "features": [
+    "RSS 피드에서 뉴스 기사 수집",
+    "텍스트 임베딩 생성 및 벡터 DB 저장",
+    "유사도 기반 문서 검색",
+    "개체명 인식(NER)을 통한 지식 그래프 구축",
+    "Neo4j에 그래프 저장 및 분석",
+    "OpenAI/HuggingFace 모델을 이용한 텍스트 생성",
+    "RAG(Retrieval-Augmented Generation) 파이프라인",
+    "CLI 및 FastAPI 웹 인터페이스"
+  ],
+  "mainModules": [
+    "src/rss_fetch",
+    "src/embeddings",
+    "src/generation",
+    "src/knowledge_graph"
+  ],
+  "suggestedActions": [
+    "RSS 피드 URL 수집 및 처리",
+    "임베딩 생성 및 벡터 DB 저장",
+    "벡터 검색을 통한 유사 문서 조회",
+    "지식 그래프 구축 및 시각화",
+    "RAG를 통한 질문 답변 생성"
+  ],
+  "dataFlow": "RSS 피드 → 임베딩 생성 → 벡터 DB 저장 → 벡터 검색 → 텍스트 생성"
+} 
