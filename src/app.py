@@ -18,6 +18,7 @@ from src.embeddings.vector_db import load_rss_to_vectordb, VectorDB
 from src.knowledge_graph.entity_extractor import EntityExtractor
 from src.knowledge_graph.graph_builder import KnowledgeGraph
 from src.knowledge_graph.neo4j_adapter import Neo4jAdapter
+from src.generation.generation import generate_text, generate_text_with_retrieved_context
 
 # FastAPI 애플리케이션 생성
 app = FastAPI(
@@ -63,6 +64,21 @@ class ProcessStatus(BaseModel):
 class SearchResult(BaseModel):
     results: List[Dict[str, Any]]
     count: int
+
+class GenerateContentRequest(BaseModel):
+    prompt: str
+    provider: str = "openai"
+    model: Optional[str] = None
+    max_tokens: int = 500
+    temperature: float = 0.7
+
+class GenerateSummaryRequest(BaseModel):
+    query: str
+    num_results: int = 3
+    provider: str = "openai"
+    model: Optional[str] = None
+    max_tokens: int = 500
+    temperature: float = 0.7
 
 # 백그라운드 작업
 async def process_feed_background(url: str, collection_name: str, ner_model: str, build_graph: bool, 
@@ -317,6 +333,80 @@ async def get_neo4j_stats():
             raise HTTPException(status_code=500, detail="Neo4j 연결 실패")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Neo4j 통계 조회 실패: {str(e)}")
+
+@app.post("/generate-content")
+async def generate_content(request: GenerateContentRequest):
+    """
+    제공된 프롬프트를 기반으로 텍스트 생성
+    """
+    try:
+        result = generate_text(
+            prompt=request.prompt,
+            provider=request.provider,
+            model=request.model,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature
+        )
+        
+        return {
+            "success": True,
+            "generated_text": result,
+            "prompt": request.prompt
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"텍스트 생성 중 오류 발생: {str(e)}")
+
+@app.post("/generate-summary-of-search")
+async def generate_summary_of_search(request: GenerateSummaryRequest):
+    """
+    검색 결과를 바탕으로 요약 생성 (RAG)
+    """
+    if vector_db is None:
+        raise HTTPException(status_code=400, detail="벡터 DB가 로드되지 않았습니다. 먼저 /feed/process를 호출하세요.")
+    
+    # 검색 수행
+    results = vector_db.search(request.query, request.num_results)
+    
+    if not results or not results.get('documents') or not results['documents'][0]:
+        raise HTTPException(status_code=404, detail=f"'{request.query}'에 대한 검색 결과가 없습니다.")
+    
+    documents = results.get('documents', [[]])[0]
+    metadatas = results.get('metadatas', [[]])[0]
+    
+    # 검색 결과 포맷팅
+    context_docs = []
+    for i, (doc, meta) in enumerate(zip(documents, metadatas)):
+        title = meta.get('title', 'N/A')
+        context_docs.append(f"제목: {title}\n내용: {doc}")
+    
+    # RAG를 사용한 텍스트 생성
+    try:
+        summary = generate_text_with_retrieved_context(
+            query=request.query,
+            contexts=context_docs,
+            provider=request.provider,
+            model=request.model,
+            max_tokens=request.max_tokens,
+            temperature=request.temperature
+        )
+        
+        return {
+            "success": True,
+            "query": request.query,
+            "summary": summary,
+            "num_documents_used": len(context_docs),
+            "documents": [
+                {
+                    "title": meta.get('title', 'N/A'),
+                    "source": meta.get('field', 'N/A'),
+                    "link": meta.get('link', 'N/A'),
+                    "published": meta.get('published', 'N/A')
+                }
+                for meta in metadatas
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"요약 생성 중 오류 발생: {str(e)}")
 
 # 서버 실행 코드
 if __name__ == "__main__":
