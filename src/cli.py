@@ -59,16 +59,24 @@ def generate_command(args):
         if args.api_key and args.provider == 'openai':
             os.environ['OPENAI_API_KEY'] = args.api_key
         
-        # 텍스트 생성
+        # 텍스트 생성 - proxies 필터링
         logger.info(f"프롬프트로 텍스트 생성 중: '{args.prompt[:50]}...'")
-        result = generate_text(
-            prompt=args.prompt,
-            provider=args.provider,
-            model=args.model,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-            api_key=args.api_key if args.provider == 'openai' else None
-        )
+        
+        # 기본 인자 추출
+        generation_kwargs = {
+            'prompt': args.prompt,
+            'provider': args.provider,
+            'model': args.model,
+            'max_tokens': args.max_tokens,
+            'temperature': args.temperature,
+        }
+        
+        # API 키 추가 (OpenAI인 경우만)
+        if args.provider == 'openai' and args.api_key:
+            generation_kwargs['api_key'] = args.api_key
+            
+        # proxies 제외하고 추가 인자 전달
+        result = generate_text(**generation_kwargs)
         
         # 결과 출력
         print("\n결과:")
@@ -116,17 +124,25 @@ def rag_command(args):
             print(f"   출처: {meta.get('field', 'N/A')}")
             print(f"   내용: {doc[:100]}..." if len(doc) > 100 else f"   내용: {doc}")
         
-        # RAG 수행
+        # RAG 수행 - proxies 필터링
         logger.info("검색 결과를 바탕으로 텍스트 생성 중...")
-        result = generate_text_with_retrieved_context(
-            query=args.query,
-            contexts=documents,
-            provider=args.provider,
-            model=args.model,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
-            api_key=args.api_key if args.provider == 'openai' else None
-        )
+        
+        # 기본 인자 추출
+        generation_kwargs = {
+            'query': args.query,
+            'contexts': documents,
+            'provider': args.provider,
+            'model': args.model,
+            'max_tokens': args.max_tokens,
+            'temperature': args.temperature,
+        }
+        
+        # API 키 추가 (OpenAI인 경우만)
+        if args.provider == 'openai' and args.api_key:
+            generation_kwargs['api_key'] = args.api_key
+            
+        # proxies 제외하고 추가 인자 전달
+        result = generate_text_with_retrieved_context(**generation_kwargs)
         
         # 결과 출력
         print("\n생성된 답변:")
