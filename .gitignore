@@ -1,0 +1,39 @@
+# 가상 환경
+venv/
+env/
+.env/
+
+# Python 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# 데이터 디렉토리 (필요에 따라 조정)
+data/
+*.json
+*.npy
+*.csv
+
+# 로그 파일
+*.log
+logs/
+
+# 벡터 DB 파일
+chroma_db/
+
+# 다운로드된 모델 캐시
+.cache/
+.vector_cache/
+
+# 시스템 파일
+.DS_Store
+Thumbs.db
+
+# IDE 관련 파일
+.idea/
+.vscode/
+*.swp
+
+# 이미 생성된 임베딩 파일
+*_embeddings.npy 

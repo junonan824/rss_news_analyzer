@@ -1,0 +1,23 @@
+# RSS 피드 파싱
+feedparser==6.0.10
+beautifulsoup4==4.12.2
+requests==2.31.0
+
+# 임베딩 및 벡터 DB
+sentence-transformers==2.2.2
+numpy==1.24.3
+chromadb==0.4.18
+
+# 자연어 처리
+nltk==3.8.1
+spacy==3.7.2
+
+# 텍스트 분석
+networkx==3.1
+pandas==2.0.3
+
+# 로깅 및 유틸리티
+loguru==0.7.2
+
+# 테스트
+pytest==7.4.3 
