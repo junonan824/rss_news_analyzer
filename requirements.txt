@@ -13,6 +13,9 @@ huggingface_hub==0.17.3
 openai==1.5.0
 transformers==4.34.0
 
+# 환경 변수 관리
+python-dotenv==1.0.0
+
 # 자연어 처리
 nltk==3.8.1
 spacy==3.7.2

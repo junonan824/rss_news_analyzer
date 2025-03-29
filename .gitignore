@@ -36,4 +36,7 @@ Thumbs.db
 *.swp
 
 # 이미 생성된 임베딩 파일
-*_embeddings.npy 
+*_embeddings.npy
+
+# .env 파일 (민감한 API 키가 포함되어 있음)
+.env 
