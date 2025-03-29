@@ -7,6 +7,7 @@ requests==2.31.0
 sentence-transformers==2.2.2
 numpy==1.24.3
 chromadb==0.4.18
+huggingface_hub==0.17.3
 
 # 자연어 처리
 nltk==3.8.1
@@ -16,6 +17,9 @@ spacy==3.7.2
 networkx==3.1
 pandas==2.0.3
 matplotlib==3.7.2
+
+# 그래프 데이터베이스
+neo4j==5.14.1
 
 # API 및 웹 서버
 fastapi==0.104.1

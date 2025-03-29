@@ -17,6 +17,7 @@ from src.embeddings.embedding import process_rss_data
 from src.embeddings.vector_db import load_rss_to_vectordb, VectorDB
 from src.knowledge_graph.entity_extractor import EntityExtractor
 from src.knowledge_graph.graph_builder import KnowledgeGraph
+from src.knowledge_graph.neo4j_adapter import Neo4jAdapter
 
 # FastAPI 애플리케이션 생성
 app = FastAPI(
@@ -33,6 +34,7 @@ os.makedirs(DATA_DIR, exist_ok=True)
 current_feed = None
 vector_db = None
 knowledge_graph = None
+neo4j_adapter = None
 
 # 모델 정의
 class FeedProcessRequest(BaseModel):
@@ -41,6 +43,13 @@ class FeedProcessRequest(BaseModel):
     ner_model: str = "en_core_web_sm"
     build_graph: bool = True
     visualize_graph: bool = True
+    export_to_neo4j: bool = False
+
+class ExportToNeo4jRequest(BaseModel):
+    uri: str = os.environ.get("NEO4J_URI", "bolt://neo4j:7687")
+    user: str = os.environ.get("NEO4J_USER", "neo4j")
+    password: str = os.environ.get("NEO4J_PASSWORD", "password")
+    clear_database: bool = True
 
 class SearchQuery(BaseModel):
     query: str
@@ -56,8 +65,9 @@ class SearchResult(BaseModel):
     count: int
 
 # 백그라운드 작업
-async def process_feed_background(url: str, collection_name: str, ner_model: str, build_graph: bool, visualize_graph: bool):
-    global current_feed, vector_db, knowledge_graph
+async def process_feed_background(url: str, collection_name: str, ner_model: str, build_graph: bool, 
+                                  visualize_graph: bool, export_to_neo4j: bool):
+    global current_feed, vector_db, knowledge_graph, neo4j_adapter
     
     try:
         # 파일 경로 설정
@@ -104,6 +114,17 @@ async def process_feed_background(url: str, collection_name: str, ner_model: str
             # 그래프 시각화 (선택적)
             if visualize_graph:
                 knowledge_graph.visualize(graph_image_path)
+            
+            # Neo4j로 내보내기 (선택적)
+            if export_to_neo4j:
+                try:
+                    # Neo4j 연결 설정은 기본값 또는 환경 변수에서 가져옴
+                    neo4j_adapter = Neo4jAdapter()
+                    if neo4j_adapter.connect():
+                        neo4j_adapter.clear_database()
+                        neo4j_adapter.import_graph(knowledge_graph.graph)
+                except Exception as e:
+                    print(f"Neo4j 내보내기 실패: {str(e)}")
         
         # 현재 피드 정보 업데이트
         current_feed = {
@@ -111,7 +132,8 @@ async def process_feed_background(url: str, collection_name: str, ner_model: str
             "collection_name": collection_name,
             "article_count": len(rss_data.get('articles', [])),
             "has_graph": build_graph,
-            "has_visualization": build_graph and visualize_graph
+            "has_visualization": build_graph and visualize_graph,
+            "exported_to_neo4j": export_to_neo4j
         }
     
     except Exception as e:
@@ -140,7 +162,8 @@ async def process_feed(request: FeedProcessRequest, background_tasks: Background
         request.collection_name,
         request.ner_model,
         request.build_graph,
-        request.visualize_graph
+        request.visualize_graph,
+        request.export_to_neo4j
     )
     
     return {
@@ -150,7 +173,8 @@ async def process_feed(request: FeedProcessRequest, background_tasks: Background
             "url": request.url,
             "collection_name": request.collection_name,
             "build_graph": request.build_graph,
-            "visualize_graph": request.visualize_graph
+            "visualize_graph": request.visualize_graph,
+            "export_to_neo4j": request.export_to_neo4j
         }
     }
 
@@ -248,6 +272,51 @@ async def get_graph_visualization():
         raise HTTPException(status_code=404, detail="그래프 시각화 이미지가 존재하지 않습니다.")
     
     return FileResponse(graph_image_path)
+
+@app.post("/graph/export-to-neo4j")
+async def export_graph_to_neo4j(request: ExportToNeo4jRequest):
+    """
+    지식 그래프를 Neo4j로 내보내기
+    """
+    if knowledge_graph is None:
+        raise HTTPException(status_code=400, detail="지식 그래프가 생성되지 않았습니다. 먼저 /feed/process를 호출하세요.")
+    
+    result = knowledge_graph.export_to_neo4j(
+        uri=request.uri,
+        user=request.user,
+        password=request.password
+    )
+    
+    if result.get('success', False):
+        return {
+            "success": True,
+            "message": "지식 그래프를 Neo4j로 성공적으로 내보냈습니다.",
+            "details": result.get('stats', {})
+        }
+    else:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Neo4j 내보내기 실패: {result.get('error', '알 수 없는 오류')}"
+        )
+
+@app.get("/neo4j/stats")
+async def get_neo4j_stats():
+    """
+    Neo4j 데이터베이스 통계 반환
+    """
+    try:
+        adapter = Neo4jAdapter()
+        if adapter.connect():
+            stats = adapter.get_stats()
+            adapter.close()
+            return {
+                "success": True,
+                "stats": stats
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Neo4j 연결 실패")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Neo4j 통계 조회 실패: {str(e)}")
 
 # 서버 실행 코드
 if __name__ == "__main__":

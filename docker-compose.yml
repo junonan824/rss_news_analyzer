@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # Python 애플리케이션 (FastAPI)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rss-news-analyzer
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+    depends_on:
+      - chroma
+      - neo4j
+    networks:
+      - rss_network
+    restart: unless-stopped
+
+  # ChromaDB 벡터 데이터베이스
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    container_name: chroma-db
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8001:8000"
+    environment:
+      - ALLOW_RESET=true
+      - ANONYMIZED_TELEMETRY=false
+    networks:
+      - rss_network
+    restart: unless-stopped
+
+  # Neo4j 그래프 데이터베이스 (선택적)
+  neo4j:
+    image: neo4j:5.12
+    container_name: neo4j-db
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/import
+      - neo4j_plugins:/plugins
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_PLUGINS=["apoc"]
+    networks:
+      - rss_network
+    restart: unless-stopped
+
+networks:
+  rss_network:
+    driver: bridge
+
+volumes:
+  chroma_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_plugins:
+    driver: local 

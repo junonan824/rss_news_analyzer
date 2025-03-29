@@ -248,122 +248,193 @@ class KnowledgeGraph:
             List[str]: 관련 개체 ID 목록
         """
         relations = self.get_relations(entity_id, relation_type)
-        related_entities = set()
+        related_entities = []
         
         for source, target, _ in relations:
             if source == entity_id:
-                related_entities.add(target)
+                related_entities.append(target)
             else:
-                related_entities.add(source)
+                related_entities.append(source)
         
-        return list(related_entities)
+        return related_entities
+    
+    def export_to_neo4j(self, uri: Optional[str] = None, user: Optional[str] = None, password: Optional[str] = None) -> Dict[str, Any]:
+        """
+        그래프를 Neo4j 데이터베이스로 내보내기
+        
+        Args:
+            uri: Neo4j 서버 URI
+            user: Neo4j 사용자명
+            password: Neo4j 비밀번호
+            
+        Returns:
+            Dict[str, Any]: 결과 상태를 담은 딕셔너리
+        """
+        try:
+            # 동적 임포트 (의존성 격리를 위해)
+            from src.knowledge_graph.neo4j_adapter import Neo4jAdapter
+            
+            # Neo4j 어댑터 초기화 및 연결
+            adapter = Neo4jAdapter(uri, user, password)
+            if not adapter.connect():
+                return {"success": False, "error": "Neo4j에 연결할 수 없습니다"}
+            
+            # 데이터베이스 초기화
+            adapter.clear_database()
+            
+            # 그래프 가져오기
+            result = adapter.import_graph(self.graph)
+            
+            if result:
+                # 통계 조회
+                stats = adapter.get_stats()
+                adapter.close()
+                return {
+                    "success": True,
+                    "message": "Neo4j로 그래프 내보내기 성공",
+                    "stats": stats
+                }
+            else:
+                adapter.close()
+                return {"success": False, "error": "Neo4j로 그래프 내보내기 실패"}
+                
+        except ImportError:
+            return {
+                "success": False,
+                "error": "Neo4j 어댑터 모듈을 찾을 수 없습니다. 'pip install neo4j'를 실행하세요."
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     def visualize(self, output_path: Optional[str] = None, entity_types: Optional[List[str]] = None) -> None:
         """
         그래프 시각화
         
         Args:
-            output_path (str, optional): 이미지 저장 경로
-            entity_types (List[str], optional): 표시할 개체 유형 목록
+            output_path (str, optional): 출력 파일 경로
+            entity_types (List[str], optional): 포함할 개체 유형 목록
         """
-        # 표시할 노드 필터링
+        if len(self.graph) == 0:
+            logger.warning("시각화할 그래프가 비어 있습니다.")
+            return
+        
+        # 서브그래프 생성 (특정 유형만 필터링)
         if entity_types:
-            nodes = [n for n, attr in self.graph.nodes(data=True) if attr.get('type') in entity_types]
-            graph = self.graph.subgraph(nodes)
+            nodes_to_include = [
+                node for node, attrs in self.graph.nodes(data=True)
+                if attrs.get('type') in entity_types
+            ]
+            subgraph = self.graph.subgraph(nodes_to_include)
         else:
-            graph = self.graph
-            
-        # 노드 색상 설정
+            subgraph = self.graph
+        
+        # 노드 색상 매핑
         node_colors = []
-        for _, attr in graph.nodes(data=True):
-            if attr.get('type') == 'PERSON':
-                node_colors.append('lightblue')
-            elif attr.get('type') == 'ORG':
-                node_colors.append('lightgreen')
-            elif attr.get('type') == 'GPE':
-                node_colors.append('salmon')
-            elif attr.get('type') == 'ARTICLE':
-                node_colors.append('yellow')
+        node_types = {}
+        
+        for _, attrs in subgraph.nodes(data=True):
+            node_type = attrs.get('type', 'UNKNOWN')
+            if node_type not in node_types:
+                node_types[node_type] = len(node_types)
+            
+            node_colors.append(node_types[node_type])
+        
+        # 엣지 색상 매핑
+        edge_colors = []
+        for _, _, attrs in subgraph.edges(data=True):
+            edge_type = attrs.get('type', 'UNKNOWN')
+            if edge_type == 'mentions':
+                edge_colors.append('blue')
+            elif edge_type == 'co_occurs_with':
+                edge_colors.append('red')
             else:
-                node_colors.append('lightgray')
+                edge_colors.append('gray')
         
-        # 그래프 그리기
+        # 그래프 레이아웃 계산
         plt.figure(figsize=(12, 10))
-        pos = nx.spring_layout(graph, seed=42)
+        pos = nx.spring_layout(subgraph, k=0.5, iterations=50)
         
-        nx.draw_networkx_nodes(graph, pos, node_color=node_colors, alpha=0.8, node_size=500)
-        nx.draw_networkx_edges(graph, pos, alpha=0.5, arrows=True)
+        # 노드 그리기
+        nx.draw_networkx_nodes(
+            subgraph, pos, 
+            node_color=node_colors, 
+            alpha=0.8, 
+            node_size=300,
+            cmap=plt.cm.tab10
+        )
         
-        # 노드 라벨
-        labels = {n: attr.get('text', n)[:20] for n, attr in graph.nodes(data=True)}
-        nx.draw_networkx_labels(graph, pos, labels=labels, font_size=8)
+        # 엣지 그리기
+        nx.draw_networkx_edges(
+            subgraph, pos, 
+            edge_color=edge_colors, 
+            alpha=0.5,
+            arrows=True,
+            arrowsize=15
+        )
         
+        # 노드 레이블 그리기
+        node_labels = {
+            node: attrs.get('text', node)[:20] + '...' if len(attrs.get('text', node)) > 20 else attrs.get('text', node)
+            for node, attrs in subgraph.nodes(data=True)
+        }
+        nx.draw_networkx_labels(subgraph, pos, labels=node_labels, font_size=8)
+        
+        # 범례 추가
+        legend_elements = []
+        
+        for node_type, idx in node_types.items():
+            color = plt.cm.tab10(idx)
+            legend_elements.append(plt.Line2D([0], [0], marker='o', color='w', 
+                                            markerfacecolor=color, markersize=10, label=node_type))
+        
+        plt.legend(handles=legend_elements, loc='upper right')
         plt.axis('off')
-        plt.tight_layout()
+        plt.title(f"지식 그래프 - {len(subgraph.nodes())}개 노드, {len(subgraph.edges())}개 엣지")
         
+        # 출력
         if output_path:
-            output_dir = os.path.dirname(output_path)
-            if output_dir and not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.savefig(output_path, bbox_inches='tight', dpi=300)
             logger.info(f"그래프 이미지가 {output_path}에 저장되었습니다.")
         else:
             plt.show()
     
     def save(self, file_path: str) -> None:
         """
-        그래프를 파일로 저장
+        그래프를 JSON 파일로 저장
         
         Args:
             file_path (str): 저장할 파일 경로
         """
-        output_dir = os.path.dirname(file_path)
-        if output_dir and not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-            
-        # 그래프 저장
-        if file_path.endswith('.graphml'):
-            nx.write_graphml(self.graph, file_path)
-        elif file_path.endswith('.gexf'):
-            nx.write_gexf(self.graph, file_path)
-        elif file_path.endswith('.json'):
-            # JSON 형식으로 저장 (NetworkX의 node_link_data 사용)
-            data = nx.node_link_data(self.graph)
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        else:
-            # 기본은 GraphML 형식
-            nx.write_graphml(self.graph, file_path)
+        # NetworkX의 노드 및 관계 데이터 변환
+        data = nx.node_link_data(self.graph)
+        
+        # JSON 파일로 저장
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
         
         logger.info(f"그래프가 {file_path}에 저장되었습니다.")
     
     @classmethod
     def load(cls, file_path: str) -> 'KnowledgeGraph':
         """
-        파일에서 그래프 로드
+        JSON 파일에서 그래프 로드
         
         Args:
-            file_path (str): 그래프 파일 경로
+            file_path (str): 로드할 파일 경로
             
         Returns:
             KnowledgeGraph: 로드된 그래프 객체
         """
-        graph_obj = cls()
+        # JSON 파일에서 데이터 로드
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
         
-        if file_path.endswith('.graphml'):
-            graph_obj.graph = nx.read_graphml(file_path)
-        elif file_path.endswith('.gexf'):
-            graph_obj.graph = nx.read_gexf(file_path)
-        elif file_path.endswith('.json'):
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            graph_obj.graph = nx.node_link_graph(data)
-        else:
-            # 기본은 GraphML 형식
-            graph_obj.graph = nx.read_graphml(file_path)
+        # 그래프 객체 생성
+        kg = cls()
+        kg.graph = nx.node_link_graph(data, directed=True, multigraph=True)
         
-        logger.info(f"그래프를 {file_path}에서 로드했습니다: {graph_obj.graph.number_of_nodes()}개 노드, {graph_obj.graph.number_of_edges()}개 엣지")
-        return graph_obj
+        logger.info(f"{file_path}에서 그래프를 로드했습니다: {kg.graph.number_of_nodes()}개 노드, {kg.graph.number_of_edges()}개 엣지")
+        return kg
 
 def build_graph_from_entities(articles_with_entities: List[Dict[str, Any]]) -> KnowledgeGraph:
     """

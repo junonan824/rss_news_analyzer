@@ -4,6 +4,8 @@
 
 ## 설치 방법
 
+### 로컬 개발 환경 설정
+
 1. 가상 환경 생성 및 활성화:
 
 ```bash
@@ -33,7 +35,22 @@ python -m spacy download en_core_web_sm
 python -m spacy download ko_core_news_sm
 ```
 
-README는 프로젝트의 문서이자 가이드라인으로, 프로젝트의 사용 맥락에 맞게 수정하시면 됩니다.
+### Docker를 사용한 설치
+
+전체 시스템을 Docker를 사용하여 설치하고 실행할 수 있습니다:
+
+```bash
+# 이미지 빌드 및 컨테이너 실행
+docker-compose up -d
+
+# 로그 확인
+docker-compose logs -f
+```
+
+이 명령어는 다음 서비스를 실행합니다:
+- RSS 뉴스 분석기 Python 애플리케이션 (FastAPI)
+- ChromaDB 벡터 데이터베이스
+- Neo4j 그래프 데이터베이스
 
 ## 임베딩 & 검색 사용 방법
 
@@ -95,6 +112,16 @@ python -m src.knowledge_graph.graph_builder data/entities.json -v data/knowledge
 python -m src.knowledge_graph.graph_builder data/entities.json -v data/knowledge_graph.png -t PERSON ORG
 ```
 
+### Neo4j에 그래프 내보내기
+
+만들어진 그래프를 Neo4j로 내보내려면:
+
+```bash
+python -m src.knowledge_graph.export_to_neo4j data/knowledge_graph.json
+```
+
+Neo4j 브라우저를 사용하여 그래프를 탐색할 수 있습니다: http://localhost:7474
+
 ## 통합 실행 (모든 기능을 한 번에)
 
 ### 명령행 인터페이스 (CLI)
@@ -136,11 +163,14 @@ python -m src.main https://feeds.bbci.co.uk/news/world/rss.xml -o data/bbc -c bb
 ### API 서버 실행
 
 ```bash
-# API 서버 시작
+# 로컬에서 API 서버 시작
 python -m src.app
 
 # 또는 uvicorn 직접 사용
 uvicorn src.app:app --reload --host 0.0.0.0 --port 8000
+
+# Docker로 실행 시
+docker-compose up -d
 ```
 
 API 서버는 기본적으로 http://localhost:8000 에서 실행됩니다.
@@ -153,7 +183,7 @@ Swagger 문서는 http://localhost:8000/docs 에서 확인할 수 있습니다.
 ```bash
 curl -X POST "http://localhost:8000/feed/process" \
   -H "Content-Type: application/json" \
-  -d '{"url": "https://feeds.bbci.co.uk/news/world/rss.xml", "build_graph": true, "visualize_graph": true}'
+  -d '{"url": "https://feeds.bbci.co.uk/news/world/rss.xml", "build_graph": true, "visualize_graph": true, "export_to_neo4j": true}'
 ```
 
 #### 상태 확인
@@ -174,9 +204,100 @@ curl "http://localhost:8000/search?query=climate%20change&num_results=5"
 curl "http://localhost:8000/graph/stats"
 ```
 
+#### Neo4j 통계 확인
+
+```bash
+curl "http://localhost:8000/neo4j/stats"
+```
+
 #### 그래프 시각화 이미지 다운로드
 
 웹 브라우저에서 http://localhost:8000/graph/visualization 접속
+
+## Docker 환경에서의 사용법
+
+### 기본 사용법
+
+```bash
+# 전체 스택 시작
+docker-compose up -d
+
+# 특정 서비스만 재시작
+docker-compose restart app
+
+# 로그 확인
+docker-compose logs -f app
+
+# 전체 중지
+docker-compose down
+```
+
+### Neo4j 브라우저 접속
+
+1. 웹 브라우저에서 http://localhost:7474 접속
+2. 로그인 정보:
+   - 사용자명: neo4j
+   - 비밀번호: password
+3. 연결 설정:
+   - 드롭다운에서 `bolt://` 선택
+   - 주소란에 `localhost:7687` 입력
+
+### Neo4j 유용한 쿼리
+
+```cypher
+// 모든 노드 보기
+MATCH (n) RETURN n LIMIT 25
+
+// 기사와 그 기사에서 언급된 엔티티 조회
+MATCH (a:ARTICLE)-[r:MENTIONS]->(e) RETURN a, r, e LIMIT 10
+
+// 특정 유형의 엔티티만 조회 (예: PERSON)
+MATCH (p:PERSON) RETURN p
+
+// 함께 등장한 엔티티 관계 조회
+MATCH (e1)-[r:CO_OCCURS_WITH]->(e2) RETURN e1, r, e2 LIMIT 20
+
+// 가장 많이 언급된 엔티티 찾기
+MATCH (e)<-[r:MENTIONS]-(a) 
+RETURN e.text AS entity, e.type AS type, COUNT(r) AS mentions 
+ORDER BY mentions DESC LIMIT 10
+```
+
+### ChromaDB 접속
+
+ChromaDB는 REST API로 접근 가능합니다: http://localhost:8001
+
+예제 API 호출:
+```bash
+# 컬렉션 목록 조회
+curl http://localhost:8001/api/v1/collections
+```
+
+### 트러블슈팅
+
+#### Neo4j 연결 문제
+- Neo4j 브라우저에서 연결할 때 URL을 `bolt://localhost:7687`로 지정
+- 사용자명과 비밀번호가 docker-compose.yml 파일의 설정과 일치하는지 확인
+
+#### huggingface_hub 호환성 문제
+version 충돌이 발생하면 다음 명령으로 해결:
+```bash
+pip install huggingface_hub==0.17.3
+```
+
+#### Docker 네트워크 문제
+```bash
+# Docker 네트워크 상태 확인
+docker network ls
+docker network inspect rss_news_analyzer_rss_network
+```
+
+### 데이터 볼륨
+
+- ChromaDB 데이터: `chroma_data` 볼륨
+- Neo4j 데이터: `neo4j_data` 볼륨
+
+Docker에서는 데이터가 볼륨에 저장되어 컨테이너가 재시작되어도 유지됩니다.
 
 ## 주요 기능
 
@@ -185,5 +306,7 @@ curl "http://localhost:8000/graph/stats"
 - ChromaDB를 활용한 효율적인 벡터 검색
 - spaCy를 이용한 개체명 인식(NER)
 - NetworkX 기반의 지식 그래프 구축
+- Neo4j를 이용한 그래프 데이터 탐색
 - 그래프 분석 및 시각화
 - FastAPI 기반 웹 API 제공
+- Docker 컨테이너화 지원

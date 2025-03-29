@@ -1,0 +1,56 @@
+# 버전 관리 시스템
+.git
+.gitignore
+.github
+
+# 개발 환경
+.venv
+venv
+.env
+.env.*
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache
+.coverage
+htmlcov/
+
+# 데이터 및 실행 결과
+data/*
+!data/.gitkeep
+*.log
+logs/
+
+# 도커 관련
+.dockerignore
+docker-compose*.yml
+Dockerfile*
+
+# 개발 도구
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 노트북
+notebooks/
+.ipynb_checkpoints/
+
+# 문서
+docs/
+*.md
+LICENSE
+
+# 테스트 및 임시 파일
+test_*.py
+*_test.py
+tests/
+temp/
+tmp/
+
+# 가상 환경
+.env
+*.env 
