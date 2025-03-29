@@ -11,12 +11,18 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
+      - ./.env:/app/.env  # .env 파일을 컨테이너 내부로 복사
     environment:
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=password
+      - OPENAI_API_KEY=${OPENAI_API_KEY}  # .env 파일에서 값을 가져옴
+      - DEFAULT_PROVIDER=${DEFAULT_PROVIDER}
+      - DEFAULT_MODEL=${DEFAULT_MODEL}
+      - VECTORDB_DIR=${VECTORDB_DIR}
+      - DEFAULT_COLLECTION=${DEFAULT_COLLECTION}
     depends_on:
       - chroma
       - neo4j
