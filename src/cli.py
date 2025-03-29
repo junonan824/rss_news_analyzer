@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.generation.generation import generate_text, generate_text_with_retrieved_context
-from src.embeddings.vector_db import VectorDBClient
+from src.embeddings.vector_db import VectorDB
 
 def parse_args():
     parser = argparse.ArgumentParser(description='텍스트 생성 및 RAG 테스트 CLI')
@@ -89,8 +89,11 @@ def rag_command(args):
         
         # 벡터 DB 연결 및 검색
         logger.info(f"검색어로 문서 검색 중: '{args.query}'")
-        db = VectorDBClient(persist_directory=args.db_dir)
-        collection = db.get_collection(args.collection)
+        db = VectorDB(
+            collection_name=args.collection,
+            persist_directory=args.db_dir
+        )
+        collection = db.collection
         
         if collection is None:
             print(f"컬렉션 '{args.collection}'을 찾을 수 없습니다.")
