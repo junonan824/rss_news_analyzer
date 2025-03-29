@@ -11,6 +11,11 @@ import argparse
 import logging
 from typing import List, Optional
 
+# 프록시 관련 환경 변수 제거 (OpenAI 클라이언트에 영향을 주지 않도록)
+for proxy_var in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'REQUESTS_CA_BUNDLE', 'no_proxy', 'NO_PROXY']:
+    if proxy_var in os.environ:
+        del os.environ[proxy_var]
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
