@@ -22,13 +22,13 @@ logger = logging.getLogger(__name__)
 class TextEmbedder:
     """텍스트를 임베딩 벡터로 변환하는 클래스"""
     
-    def __init__(self, model_name: str = 'all-MiniLM-L6-v2'):
+    def __init__(self, model_name: str = 'paraphrase-multilingual-MiniLM-L12-v2'):
         """
         TextEmbedder 초기화
         
         Args:
             model_name (str): 사용할 sentence-transformers 모델 이름
-                            기본값은 'all-MiniLM-L6-v2'로 속도와 품질의 균형이 좋은 모델
+                            기본값은 'paraphrase-multilingual-MiniLM-L12-v2'로 다국어 지원 모델
         """
         logger.info(f"임베딩 모델 '{model_name}' 로딩 중...")
         try:
@@ -126,14 +126,14 @@ class TextEmbedder:
         }
 
 def process_rss_data(json_path: str, 
-                    model_name: str = 'all-MiniLM-L6-v2',
+                    model_name: str = 'paraphrase-multilingual-MiniLM-L12-v2',
                     output_path: Optional[str] = None) -> Dict[str, Any]:
     """
     RSS JSON 데이터를 로드하여 텍스트 임베딩 생성
     
     Args:
         json_path (str): RSS 데이터가 저장된 JSON 파일 경로
-        model_name (str): 사용할 임베딩 모델 이름
+        model_name (str): 사용할 임베딩 모델 이름 (기본값: 다국어 지원 모델)
         output_path (str, optional): 임베딩 결과를 저장할 파일 경로
         
     Returns:
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description='RSS 데이터에서 텍스트 임베딩을 생성합니다.')
     parser.add_argument('json_path', help='RSS 데이터가 저장된 JSON 파일 경로')
-    parser.add_argument('-m', '--model', default='all-MiniLM-L6-v2', help='사용할 임베딩 모델 이름')
+    parser.add_argument('-m', '--model', default='paraphrase-multilingual-MiniLM-L12-v2', help='사용할 임베딩 모델 이름')
     parser.add_argument('-o', '--output', help='임베딩 결과를 저장할 파일 경로')
     
     args = parser.parse_args()

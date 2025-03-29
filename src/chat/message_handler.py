@@ -79,16 +79,23 @@ class MessageHandler:
             
             # 관련 문서 검색
             query_with_context = self._build_enhanced_query(context, message)
+            logger.info(f"검색 쿼리: '{query_with_context}'")
+            
             relevant_docs = self.vector_db.search(
                 query_with_context, 
                 n_results=3
             )
             
-            # 검색 결과 구조 로깅 추가
-            logger.debug(f"검색 결과 구조: {relevant_docs.keys()}")
+            # 검색 결과 로깅
+            doc_count = len(relevant_docs.get("documents", [[]])[0]) if relevant_docs and "documents" in relevant_docs else 0
+            logger.info(f"검색 결과: {doc_count}개 문서 찾음")
             
-            # 문제가 되는 조건문 수정
-            if not relevant_docs or len(relevant_docs.get("documents", [[]])[0]) == 0:
+            if doc_count > 0:
+                distances = relevant_docs.get("distances", [[]])[0]
+                logger.info(f"유사도 점수: {distances}")
+            
+            # 문서가 있으면 항상 사용 (유사도에 상관없이)
+            if not relevant_docs or doc_count == 0:
                 logger.info("No relevant documents found, using direct generation")
                 return await self._generate_direct_response(context, message)
             
@@ -159,9 +166,11 @@ class MessageHandler:
 {prompt}
 
 지침:
-1. 제공된 문서에 관련 정보가 있으면 그 정보를 바탕으로 답변하세요.
+1. 제공된 문서에 관련 정보가 있으면 그 정보를 바탕으로 상세히 답변하세요.
 2. 정보가 불충분하거나 관련이 없으면 솔직하게 모른다고 답변하세요.
-3. 답변은 친절하고 자연스러운 한국어로 작성하세요.
+3. 문서가 영어로 작성되어 있더라도 한국어로 질문했다면 한국어로 답변하세요.
+4. 답변은 친절하고 자연스러운 한국어로 작성하세요.
+5. 문서의 출처(신문사 등)를 언급하여 정보의 신뢰성을 높이세요.
 
 답변:"""
             

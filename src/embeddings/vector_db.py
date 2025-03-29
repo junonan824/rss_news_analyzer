@@ -25,7 +25,7 @@ class VectorDB:
     def __init__(self, 
                 collection_name: str = "rss_articles",
                 persist_directory: Optional[str] = "data/chroma_db",
-                embedding_model: str = "all-MiniLM-L6-v2"):
+                embedding_model: str = "paraphrase-multilingual-MiniLM-L12-v2"):
         """
         VectorDB 초기화
         
@@ -33,6 +33,7 @@ class VectorDB:
             collection_name (str): ChromaDB 컬렉션 이름
             persist_directory (str, optional): 데이터베이스 저장 디렉토리
             embedding_model (str): 임베딩 모델 이름 (직접 임베딩을 생성하는 경우 사용)
+                                   기본값은 다국어 지원 모델인 paraphrase-multilingual-MiniLM-L12-v2
         """
         self.collection_name = collection_name
         self.persist_directory = persist_directory
