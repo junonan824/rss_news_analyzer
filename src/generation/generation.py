@@ -151,21 +151,40 @@ def _generate_with_openai(
     # 모델 설정
     model = model or DEFAULT_OPENAI_MODEL
     
-    # OpenAI 클라이언트 초기화 - 최소한의 인자만 사용
-    client = OpenAI(api_key=api_key)
-    
     try:
-        # 필수 인자만 사용하여 API 호출
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }],
-            max_tokens=max_tokens,
-            temperature=temperature
-        )
-        return response.choices[0].message.content.strip()
+        # OpenAI 클라이언트 초기화 - 명시적으로 api_key 인자만 전달
+        import openai
+        # 임시 변수로 기존 환경 변수 저장
+        old_http_proxy = os.environ.pop('http_proxy', None)
+        old_https_proxy = os.environ.pop('https_proxy', None)
+        old_HTTP_PROXY = os.environ.pop('HTTP_PROXY', None)
+        old_HTTPS_PROXY = os.environ.pop('HTTPS_PROXY', None)
+        
+        try:
+            # 클라이언트 생성 (기본 kwargs 없이)
+            client = OpenAI(api_key=api_key)
+            
+            # 메시지 준비
+            messages = [{"role": "user", "content": prompt}]
+            
+            # API 호출
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            return response.choices[0].message.content.strip()
+        finally:
+            # 환경 변수 복원
+            if old_http_proxy:
+                os.environ['http_proxy'] = old_http_proxy
+            if old_https_proxy:
+                os.environ['https_proxy'] = old_https_proxy 
+            if old_HTTP_PROXY:
+                os.environ['HTTP_PROXY'] = old_HTTP_PROXY
+            if old_HTTPS_PROXY:
+                os.environ['HTTPS_PROXY'] = old_HTTPS_PROXY
     except Exception as e:
         logger.error(f"OpenAI API 호출 중 오류 발생: {e}")
         return f"오류: {str(e)}"
