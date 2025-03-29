@@ -15,6 +15,7 @@ spacy==3.7.2
 # 텍스트 분석
 networkx==3.1
 pandas==2.0.3
+matplotlib==3.7.2
 
 # 로깅 및 유틸리티
 loguru==0.7.2

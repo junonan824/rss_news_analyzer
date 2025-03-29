@@ -138,6 +138,8 @@ class VectorDB:
             query (str): 검색 쿼리
             n_results (int): 반환할 결과 수
             where (Dict, optional): 메타데이터 필터링 조건
+                  예시: {"$and": [{"field": "title"}, {"source": "article"}]}
+                  다중 조건은 $and 또는 $or 연산자를 사용해야 함
             
         Returns:
             Dict: 검색 결과
@@ -168,6 +170,8 @@ class VectorDB:
             vector (List[float]): 검색할 임베딩 벡터
             n_results (int): 반환할 결과 수
             where (Dict, optional): 메타데이터 필터링 조건
+                  예시: {"$and": [{"field": "title"}, {"source": "article"}]}
+                  다중 조건은 $and 또는 $or 연산자를 사용해야 함
             
         Returns:
             Dict: 검색 결과

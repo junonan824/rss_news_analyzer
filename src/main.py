@@ -1,7 +1,7 @@
 """
 RSS 피드 처리 및 벡터 DB 검색 통합 스크립트
 
-이 스크립트는 RSS 피드 수집, 임베딩 생성, 벡터 DB 저장, 검색까지의
+이 스크립트는 RSS 피드 수집, 임베딩 생성, 벡터 DB 저장, 검색, 지식 그래프 생성까지의
 전체 과정을 수행합니다.
 """
 
@@ -11,6 +11,8 @@ import logging
 from src.rss_fetch.rss_fetch import process_rss_feed
 from src.embeddings.embedding import process_rss_data
 from src.embeddings.vector_db import load_rss_to_vectordb
+from src.knowledge_graph.entity_extractor import EntityExtractor
+from src.knowledge_graph.graph_builder import KnowledgeGraph
 
 # 로깅 설정
 logging.basicConfig(
@@ -20,12 +22,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
-    parser = argparse.ArgumentParser(description='RSS 피드 처리 및 벡터 DB 검색')
+    parser = argparse.ArgumentParser(description='RSS 피드 처리 및 벡터 DB 검색, 지식 그래프 생성')
     parser.add_argument('url', help='RSS 피드 URL')
     parser.add_argument('-o', '--output_dir', default='data', help='출력 디렉토리')
     parser.add_argument('-c', '--collection', default='rss_articles', help='벡터 DB 컬렉션 이름')
     parser.add_argument('-q', '--query', help='검색 쿼리 (선택사항)')
     parser.add_argument('-n', '--num_results', type=int, default=5, help='검색 결과 수')
+    parser.add_argument('-g', '--graph', action='store_true', help='지식 그래프 생성')
+    parser.add_argument('-v', '--visualize', action='store_true', help='그래프 시각화')
+    parser.add_argument('--ner_model', default='en_core_web_sm', help='NER에 사용할 spaCy 모델')
     
     args = parser.parse_args()
     
@@ -72,6 +77,62 @@ def main():
                 print(f"출처: {meta.get('field', 'N/A')}")
                 print(f"링크: {meta.get('link', 'N/A')}")
                 print(f"내용: {doc[:200]}..." if len(doc) > 200 else f"내용: {doc}")
+        
+        # 지식 그래프 생성 (선택사항)
+        if args.graph:
+            # 개체 추출
+            logger.info("NER을 사용하여 개체 추출 중...")
+            import json
+            with open(rss_json_path, 'r', encoding='utf-8') as f:
+                rss_data = json.load(f)
+            
+            extractor = EntityExtractor(model_name=args.ner_model)
+            articles_with_entities = extractor.extract_entities_batch(rss_data.get('articles', []))
+            
+            # 추출된 개체 저장
+            entities_json_path = os.path.join(args.output_dir, 'entities.json')
+            with open(entities_json_path, 'w', encoding='utf-8') as f:
+                json.dump({"articles": articles_with_entities}, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"개체 추출 결과가 {entities_json_path}에 저장되었습니다.")
+            
+            # 그래프 생성
+            logger.info("지식 그래프 생성 중...")
+            graph = KnowledgeGraph()
+            graph.build_from_articles(articles_with_entities)
+            
+            # 그래프 저장
+            graph_file_path = os.path.join(args.output_dir, 'knowledge_graph.json')
+            graph.save(graph_file_path)
+            
+            # 그래프 통계 출력
+            node_types = {}
+            for _, attr in graph.graph.nodes(data=True):
+                node_type = attr.get('type', 'UNKNOWN')
+                node_types[node_type] = node_types.get(node_type, 0) + 1
+            
+            edge_types = {}
+            for _, _, attr in graph.graph.edges(data=True):
+                edge_type = attr.get('type', 'UNKNOWN')
+                edge_types[edge_type] = edge_types.get(edge_type, 0) + 1
+            
+            print("\n그래프 통계:")
+            print(f"- 총 노드 수: {graph.graph.number_of_nodes()}")
+            print(f"- 총 엣지 수: {graph.graph.number_of_edges()}")
+            
+            print("\n노드 유형별 통계:")
+            for node_type, count in sorted(node_types.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {node_type}: {count}")
+            
+            print("\n엣지 유형별 통계:")
+            for edge_type, count in sorted(edge_types.items(), key=lambda x: x[1], reverse=True):
+                print(f"  {edge_type}: {count}")
+            
+            # 그래프 시각화 (선택사항)
+            if args.visualize:
+                graph_image_path = os.path.join(args.output_dir, 'knowledge_graph.png')
+                print(f"\n그래프 시각화 중... (이미지: {graph_image_path})")
+                graph.visualize(graph_image_path)
                 
     except Exception as e:
         logger.error(f"처리 중 오류 발생: {str(e)}")

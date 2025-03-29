@@ -88,7 +88,7 @@ def test_vector_db():
     filtered_results = db.search(
         query="인공지능",
         n_results=3,
-        where={"source": "test", "category": "AI"}
+        where={"$and": [{"source": "test"}, {"category": "AI"}]}
     )
     
     if filtered_results["documents"][0]:
