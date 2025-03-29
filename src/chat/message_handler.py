@@ -6,14 +6,26 @@
 
 import logging
 from typing import List, Dict, Any, Optional
+import asyncio
 
 from .context_manager import ContextManager
 from src.embeddings.vector_db import VectorDB
 from src.generation.generation import TextGenerator
 
+# RSS 피드 관련 임포트 추가
+from src.rss_fetch.rss_fetch import process_rss_feed, find_relevant_rss_feeds
+from src.embeddings.embedding import process_rss_data
+
+import os
+import json
+import tempfile
+
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
+# 유사도 임계값 및 최소 문서 수 설정
+SIMILARITY_THRESHOLD = 30.0
+MIN_DOCUMENTS_REQUIRED = 1
 
 class MessageHandler:
     """채팅 메시지 처리 클래스"""
@@ -34,6 +46,8 @@ class MessageHandler:
         self.generator = generator
         self.collection_name = collection_name
         self.context_manager = ContextManager()
+        self.data_dir = os.path.join("data", "on_demand")
+        os.makedirs(self.data_dir, exist_ok=True)
     
     def _load_dependencies(self):
         """필요한 의존성 로드"""
@@ -93,21 +107,115 @@ class MessageHandler:
             if doc_count > 0:
                 distances = relevant_docs.get("distances", [[]])[0]
                 logger.info(f"유사도 점수: {distances}")
+                
+                # 유사도 점수 확인 - 너무 낮으면 새 데이터 가져오기
+                has_high_quality_results = any(1.0/dist < SIMILARITY_THRESHOLD for dist in distances)
+                if doc_count < MIN_DOCUMENTS_REQUIRED or not has_high_quality_results:
+                    logger.info(f"검색 결과 품질이 낮음, 새로운 RSS 피드 가져오기")
+                    
+                    # 새 RSS 피드 가져와서 처리
+                    updated = await self._fetch_and_update_rss(query_with_context)
+                    
+                    if updated:
+                        # 다시 검색
+                        relevant_docs = self.vector_db.search(
+                            query_with_context, 
+                            n_results=3
+                        )
+                        
+                        doc_count = len(relevant_docs.get("documents", [[]])[0]) if relevant_docs else 0
+                        logger.info(f"업데이트 후 검색 결과: {doc_count}개 문서 찾음")
             
-            # 문서가 있으면 항상 사용 (유사도에 상관없이)
+            # 문서가 여전히 없으면 일반 응답 생성
             if not relevant_docs or doc_count == 0:
                 logger.info("No relevant documents found, using direct generation")
                 return await self._generate_direct_response(context, message)
             
             # RAG 기반 응답 생성
-            prompt = self.context_manager.build_prompt_with_context(context, message)
-            response = self._generate_rag_response(prompt, relevant_docs, context)
+            response = await self._generate_rag_response(context, message, relevant_docs)
             
             return response
         
         except Exception as e:
             logger.error(f"Error handling message: {e}")
             return "죄송합니다. 메시지를 처리하는 동안 오류가 발생했습니다."
+    
+    async def _fetch_and_update_rss(self, query: str) -> bool:
+        """쿼리와 관련된 RSS 피드를 가져와 벡터 DB 업데이트
+        
+        Args:
+            query: 검색 쿼리
+            
+        Returns:
+            bool: 업데이트 성공 여부
+        """
+        try:
+            # 1. 키워드에 관련된 RSS 피드 URL 찾기
+            relevant_feeds = find_relevant_rss_feeds(query)
+            
+            if not relevant_feeds:
+                logger.info("쿼리와 관련된 RSS 피드를 찾을 수 없습니다.")
+                return False
+            
+            # 2. 각 피드 처리 및 벡터 DB 업데이트
+            for feed_url in relevant_feeds[:3]:  # 최대 3개 피드만 처리
+                # 임시 파일 사용
+                with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as temp_file:
+                    rss_json_path = temp_file.name
+                
+                # RSS 피드 처리
+                logger.info(f"RSS 피드 처리 중: {feed_url}")
+                await asyncio.to_thread(process_rss_feed, feed_url, rss_json_path)
+                
+                # 임베딩 생성
+                embedding_json_path = os.path.join(self.data_dir, f"embedding_{os.path.basename(rss_json_path)}")
+                await asyncio.to_thread(process_rss_data, rss_json_path, output_path=embedding_json_path)
+                
+                # 벡터 DB 업데이트
+                with open(rss_json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # 기존 컬렉션에 추가
+                articles = data.get('articles', [])
+                
+                if articles:
+                    # 임베딩 데이터 로드
+                    with open(embedding_json_path, 'r', encoding='utf-8') as f:
+                        embedding_data = json.load(f)
+                        
+                    texts = embedding_data.get('texts', [])
+                    metadata = embedding_data.get('metadata', [])
+                    
+                    # 임베딩 파일 경로
+                    embedding_file = embedding_data.get('embedding_file')
+                    embeddings = None
+                    
+                    if embedding_file and os.path.exists(embedding_file):
+                        import numpy as np
+                        embeddings = np.load(embedding_file)
+                    
+                    # 벡터 DB 업데이트
+                    self.vector_db.add_texts(
+                        texts=texts,
+                        metadatas=metadata,
+                        embeddings=embeddings.tolist() if embeddings is not None else None
+                    )
+                    
+                    logger.info(f"{len(texts)}개의 새 문서가 벡터 DB에 추가되었습니다.")
+                
+                # 임시 파일 정리
+                try:
+                    os.remove(rss_json_path)
+                    if os.path.exists(embedding_file):
+                        os.remove(embedding_file)
+                except:
+                    pass
+            
+            return True
+        
+        except Exception as e:
+            logger.error(f"RSS 피드 업데이트 중 오류 발생: {e}")
+            return False
     
     def _build_enhanced_query(self, context, message: str) -> str:
         """컨텍스트를 고려한 향상된 검색 쿼리 생성"""
@@ -124,64 +232,74 @@ class MessageHandler:
         return message
     
     async def _generate_direct_response(self, context, message: str) -> str:
-        """일반 응답 생성"""
-        if self.generator:
-            prompt = self.context_manager.build_prompt_with_context(context, message)
-            try:
-                response = self.generator.generate_text(prompt)
-                return response
-            except Exception as e:
-                logger.error(f"Error generating direct response: {e}")
+        """직접 응답 생성 (관련 문서 없음)
         
-        return self._generate_fallback_response(message)
-    
-    def _generate_rag_response(self, prompt: str, relevant_docs, context) -> str:
-        """RAG 기반 응답 생성"""
-        if not self.generator:
-            return self._generate_fallback_response(prompt)
+        Args:
+            context: 대화 컨텍스트
+            message: 사용자 메시지
+            
+        Returns:
+            생성된 응답
+        """
+        # 컨텍스트 기반 프롬프트 구성
+        prompt = self.context_manager.build_prompt_with_context(context, message)
         
+        # 직접 응답 생성
         try:
-            # 관련 문서 내용 추출 - documents 구조에 맞게 수정
+            return await self.generator.generate_text_async(
+                prompt=prompt, 
+                max_tokens=500,
+                temperature=0.7
+            )
+        except Exception as e:
+            logger.error(f"Error generating direct response: {e}")
+            return "죄송합니다. 현재 이 정보에 대한 응답을 생성할 수 없습니다."
+            
+    async def _generate_rag_response(self, context, message: str, relevant_docs: Dict) -> str:
+        """RAG 기반 응답 생성
+        
+        Args:
+            context: 대화 컨텍스트
+            message: 사용자 메시지
+            relevant_docs: 검색 결과
+            
+        Returns:
+            생성된 응답
+        """
+        try:
+            # 관련 문서 추출
             documents = relevant_docs.get("documents", [[]])[0]
             metadatas = relevant_docs.get("metadatas", [[]])[0]
             
-            doc_texts = []
-            for i, (doc, meta) in enumerate(zip(documents, metadatas)):
-                title = meta.get("title", "제목 없음")
-                # 출처 정보 추가
-                source = meta.get("source", "") or meta.get("field", "")
-                published = meta.get("published", "")
-                doc_texts.append(f"문서 {i+1}:\n제목: {title}\n출처: {source}\n발행일: {published}\n내용: {doc}")
+            # 문서와 메타데이터 결합
+            contexts = []
+            for doc, meta in zip(documents, metadatas):
+                context_entry = f"제목: {meta.get('title', '제목 없음')}\n\n{doc}"
+                if 'url' in meta:
+                    context_entry += f"\n\nURL: {meta.get('url')}"
+                contexts.append(context_entry)
             
-            # 문서 컨텍스트 구성
-            docs_context = "\n\n".join(doc_texts)
+            # RAG 응답 생성
+            response = await self.generator.generate_text_with_retrieved_context_async(
+                query=message,
+                contexts=contexts,
+                max_tokens=800,
+                temperature=0.7
+            )
             
-            # RAG 프롬프트 구성 - 지시사항 명확화
-            rag_prompt = f"""다음 정보를 바탕으로 사용자의 최근 질문에 답변해주세요:
-
-검색된 관련 문서:
-{docs_context}
-
-대화 컨텍스트:
-{prompt}
-
-지침:
-1. 제공된 문서에 관련 정보가 있으면 그 정보를 바탕으로 상세히 답변하세요.
-2. 정보가 불충분하거나 관련이 없으면 솔직하게 모른다고 답변하세요.
-3. 문서가 영어로 작성되어 있더라도 한국어로 질문했다면 한국어로 답변하세요.
-4. 답변은 친절하고 자연스러운 한국어로 작성하세요.
-5. 문서의 출처(신문사 등)를 언급하여 정보의 신뢰성을 높이세요.
-
-답변:"""
-            
-            # 응답 생성
-            response = self.generator.generate_text(rag_prompt)
             return response
-        
+            
         except Exception as e:
             logger.error(f"Error generating RAG response: {e}")
-            return self._generate_fallback_response(prompt)
+            return "죄송합니다. 관련 정보를 기반으로 응답을 생성하는 중 오류가 발생했습니다."
     
     def _generate_fallback_response(self, message: str) -> str:
-        """폴백 응답 생성"""
-        return "메시지를 받았습니다. 하지만 현재 적절한 응답을 생성할 수 없습니다." 
+        """폴백 응답 생성
+        
+        Args:
+            message: 사용자 메시지
+            
+        Returns:
+            생성된 응답
+        """
+        return "죄송합니다. 현재 검색 시스템이 이용 불가능합니다. 나중에 다시 시도해주세요." 

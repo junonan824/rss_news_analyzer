@@ -5,12 +5,20 @@ RSS Feed Fetcher Module
 JSON 파일 형태로 저장하는 기능을 제공합니다.
 """
 
-import os
-import json
-import datetime
-import feedparser
-from bs4 import BeautifulSoup
 import logging
+import json
+import os
+import re
+import time
+from datetime import datetime
+from typing import Dict, List, Any, Optional, Tuple
+
+import feedparser
+import requests
+from bs4 import BeautifulSoup
+from newspaper import Article
+from tqdm import tqdm
+from urllib.parse import urlparse, urljoin
 
 # 로깅 설정
 logging.basicConfig(
@@ -18,6 +26,201 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# 기본 RSS 피드 소스 목록
+DEFAULT_RSS_FEEDS = {
+    "news": [
+        "https://news.google.com/rss",
+        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+        "https://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://www.yahoo.com/news/rss/world"
+    ],
+    "tech": [
+        "https://news.google.com/rss/search?q=technology&hl=en-US&gl=US&ceid=US:en",
+        "https://techcrunch.com/feed/",
+        "https://www.wired.com/feed/rss",
+        "https://feeds.arstechnica.com/arstechnica/technology-lab"
+    ],
+    "science": [
+        "https://news.google.com/rss/search?q=science&hl=en-US&gl=US&ceid=US:en",
+        "https://www.sciencedaily.com/rss/all.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml"
+    ],
+    "business": [
+        "https://news.google.com/rss/search?q=business&hl=en-US&gl=US&ceid=US:en",
+        "https://feeds.bloomberg.com/markets/news.rss",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"
+    ],
+    "health": [
+        "https://news.google.com/rss/search?q=health&hl=en-US&gl=US&ceid=US:en",
+        "https://rss.nytimes.com/services/xml/rss/nyt/Health.xml",
+        "https://www.who.int/rss-feeds/news-english.xml"
+    ],
+    "disaster": [
+        "https://news.google.com/rss/search?q=disaster+OR+earthquake+OR+hurricane&hl=en-US&gl=US&ceid=US:en"
+    ],
+    "general": [
+        "https://news.google.com/rss",
+        "https://www.reddit.com/r/news/.rss"
+    ],
+    # 한국어 RSS 피드
+    "korean": [
+        "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko",
+        "https://news.google.com/rss/search?q=최신뉴스&hl=ko&gl=KR&ceid=KR:ko"
+    ],
+    "korean_tech": [
+        "https://news.google.com/rss/search?q=기술&hl=ko&gl=KR&ceid=KR:ko"
+    ],
+    "korean_science": [
+        "https://news.google.com/rss/search?q=과학&hl=ko&gl=KR&ceid=KR:ko"
+    ],
+    "korean_disaster": [
+        "https://news.google.com/rss/search?q=지진%20재난&hl=ko&gl=KR&ceid=KR:ko"
+    ]
+}
+
+# 키워드 매핑
+KEYWORD_TO_CATEGORY = {
+    # 영어 키워드
+    "tech": "tech",
+    "technology": "tech",
+    "digital": "tech",
+    "software": "tech",
+    "hardware": "tech",
+    "ai": "tech",
+    "artificial intelligence": "tech",
+    
+    "science": "science",
+    "research": "science",
+    "discovery": "science",
+    "space": "science",
+    
+    "business": "business",
+    "economy": "business",
+    "finance": "business",
+    "market": "business",
+    "stocks": "business",
+    
+    "health": "health",
+    "medical": "health",
+    "medicine": "health",
+    "disease": "health",
+    "covid": "health",
+    
+    "disaster": "disaster",
+    "earthquake": "disaster",
+    "hurricane": "disaster",
+    "storm": "disaster",
+    "flooding": "disaster",
+    "wildfire": "disaster",
+    
+    # 한국어 키워드
+    "기술": "korean_tech",
+    "테크": "korean_tech",
+    "디지털": "korean_tech",
+    "소프트웨어": "korean_tech",
+    "하드웨어": "korean_tech",
+    "인공지능": "korean_tech",
+    
+    "과학": "korean_science",
+    "연구": "korean_science",
+    "발견": "korean_science",
+    "우주": "korean_science",
+    
+    "비즈니스": "business",
+    "경제": "business",
+    "금융": "business",
+    "시장": "business",
+    "주식": "business",
+    
+    "건강": "health",
+    "의학": "health",
+    "질병": "health",
+    "코로나": "health",
+    
+    "재난": "korean_disaster",
+    "지진": "korean_disaster",
+    "태풍": "korean_disaster",
+    "폭풍": "korean_disaster",
+    "홍수": "korean_disaster",
+    "산불": "korean_disaster",
+    
+    # 일반 뉴스
+    "news": "news",
+    "뉴스": "korean",
+    "최신": "korean"
+}
+
+def find_relevant_rss_feeds(query: str) -> List[str]:
+    """
+    쿼리와 관련된 RSS 피드 URL 목록을 반환
+    
+    Args:
+        query: 검색 쿼리
+        
+    Returns:
+        관련 RSS 피드 URL 목록
+    """
+    relevant_feeds = []
+    query_lower = query.lower()
+    matched_categories = set()
+    
+    # 1. 키워드 매칭으로 카테고리 찾기
+    for keyword, category in KEYWORD_TO_CATEGORY.items():
+        if keyword.lower() in query_lower:
+            matched_categories.add(category)
+    
+    # 2. 카테고리별 피드 추가
+    for category in matched_categories:
+        if category in DEFAULT_RSS_FEEDS:
+            relevant_feeds.extend(DEFAULT_RSS_FEEDS[category])
+    
+    # 3. 카테고리 매칭이 없으면 한영 키워드로 Google News 검색 피드 생성
+    if not matched_categories:
+        # 영어 쿼리로 가정
+        encoded_query = requests.utils.quote(query)
+        google_news_feed = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en"
+        relevant_feeds.append(google_news_feed)
+        
+        # 한국어 피드 추가 (기본 포함)
+        relevant_feeds.append("https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko")
+        
+        # 한국어 버전으로도 검색해보기
+        google_news_feed_ko = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+        relevant_feeds.append(google_news_feed_ko)
+    
+    # 4. 최종 피드 반환 (중복 제거)
+    return list(set(relevant_feeds))
+
+def _extract_content_with_newspaper(url: str) -> Tuple[str, str, Dict]:
+    """newspaper3k를 사용하여 기사 내용을 추출
+    
+    Args:
+        url: 기사 URL
+        
+    Returns:
+        (텍스트, 요약, 메타데이터) 튜플
+    """
+    try:
+        article = Article(url)
+        article.download()
+        article.parse()
+        article.nlp()  # 요약 및 키워드 추출
+        
+        # 메타데이터 추출
+        metadata = {
+            "title": article.title,
+            "publish_date": article.publish_date.isoformat() if article.publish_date else None,
+            "authors": article.authors,
+            "keywords": article.keywords,
+            "summary": article.summary,
+            "url": url
+        }
+        
+        return article.text, article.summary, metadata
+    except Exception as e:
+        logger.error(f"Error extracting content from {url}: {e}")
+        return "", "", {"url": url, "error": str(e)}
 
 def fetch_rss(url: str) -> list:
     """
@@ -61,27 +264,39 @@ def clean_html(html_text: str) -> str:
     soup = BeautifulSoup(html_text, 'html.parser')
     return soup.get_text(separator=' ', strip=True)
 
-def normalize_date(date_str: str) -> str:
-    """
-    다양한 형식의 날짜 문자열을 표준 형식으로 변환합니다.
+def normalize_date(date_str):
+    """날짜 문자열을 ISO 형식으로 변환합니다.
     
     Args:
-        date_str (str): 날짜 문자열
+        date_str: 날짜 문자열 또는 time_struct
         
     Returns:
-        str: 표준화된 날짜 문자열 (ISO 형식)
+        ISO 형식의 날짜 문자열 또는 None
     """
     if not date_str:
-        return datetime.datetime.now().isoformat()
-    
+        return None
+        
     try:
-        # feedparser가 대부분의 날짜를 datetime 객체로 변환해줌
-        date_obj = datetime.datetime(*date_str[:6])
-        return date_obj.isoformat()
-    except (TypeError, ValueError):
-        # 변환 실패 시 현재 시간 반환
-        logger.warning(f"날짜 변환 실패: {date_str}, 현재 시간으로 대체")
-        return datetime.datetime.now().isoformat()
+        # time_struct 형식인 경우 (feedparser가 반환하는 형식)
+        if hasattr(date_str, '__len__') and len(date_str) >= 6:
+            date_obj = datetime(*date_str[:6])
+            return date_obj.isoformat()
+        
+        # 이미 문자열인 경우 파싱 시도
+        return datetime.fromisoformat(date_str).isoformat()
+    except (ValueError, TypeError, AttributeError):
+        try:
+            # 다양한 형식 지원
+            for fmt in ["%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S"]:
+                try:
+                    date_obj = datetime.strptime(date_str, fmt)
+                    return date_obj.isoformat()
+                except (ValueError, TypeError):
+                    continue
+        except Exception:
+            pass
+    
+    return None
 
 def extract_article_data(entries: list) -> list:
     """
@@ -120,29 +335,36 @@ def save_to_json(articles: list, output_file: str = 'rss_data.json') -> str:
     기사 데이터를 JSON 파일로 저장합니다.
     
     Args:
-        articles (list): 기사 데이터 리스트
-        output_file (str, optional): 저장할 파일 경로. 기본값은 'rss_data.json'
+        articles (list): 저장할 기사 목록
+        output_file (str, optional): 출력 파일 경로. 기본값은 'rss_data.json'.
         
     Returns:
-        str: 저장된 파일의 절대 경로
+        str: 저장된 파일 경로
     """
-    # 디렉토리가 없으면 생성
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # 디렉토리 생성 (필요한 경우)
+    os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     
-    # 데이터에 타임스탬프 추가
+    # 메타데이터와 함께 JSON 저장
     data = {
-        'timestamp': datetime.datetime.now().isoformat(),
-        'articles': articles
+        'articles': articles,
+        'count': len(articles),
+        'timestamp': datetime.now().isoformat(),
     }
     
-    # JSON 파일로 저장
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    logger.info(f"데이터가 성공적으로 저장됨: {os.path.abspath(output_file)}")
-    return os.path.abspath(output_file)
+    try:
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        
+        logger.info(f"{len(articles)}개 기사를 {output_file}에 저장했습니다.")
+        return os.path.abspath(output_file)
+    except Exception as e:
+        logger.error(f"JSON 저장 실패: {e}")
+        # 대체 파일 이름 생성
+        alt_file = f"backup_{int(time.time())}.json"
+        logger.info(f"대체 파일에 저장 시도: {alt_file}")
+        with open(alt_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        return os.path.abspath(alt_file)
 
 def process_rss_feed(url: str, output_file: str = 'rss_data.json') -> str:
     """
