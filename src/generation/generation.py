@@ -151,11 +151,11 @@ def _generate_with_openai(
     # 모델 설정
     model = model or DEFAULT_OPENAI_MODEL
     
-    # OpenAI 클라이언트 초기화 - 'proxies' 제거
-    filtered_kwargs = {k: v for k, v in kwargs.items() if k not in ["api_key", "proxies"]}
-    client = OpenAI(api_key=api_key, **filtered_kwargs)
+    # OpenAI 클라이언트 초기화 - 최소한의 인자만 사용
+    client = OpenAI(api_key=api_key)
     
     try:
+        # 필수 인자만 사용하여 API 호출
         response = client.chat.completions.create(
             model=model,
             messages=[{
@@ -163,8 +163,7 @@ def _generate_with_openai(
                 "content": prompt
             }],
             max_tokens=max_tokens,
-            temperature=temperature,
-            **{k: v for k, v in kwargs.items() if k not in ["api_key", "proxies"]}
+            temperature=temperature
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -198,15 +197,14 @@ def _generate_with_huggingface(
     model_name = model or DEFAULT_HF_MODEL
     
     try:
-        # 텍스트 생성 파이프라인 설정
+        # 텍스트 생성 파이프라인 설정 - 기본 인자만 사용
         generator = pipeline(
             "text-generation",
             model=model_name,
-            tokenizer=model_name,
-            **{k: v for k, v in kwargs.items() if k not in ["api_key", "proxies"]}
+            tokenizer=model_name
         )
         
-        # 텍스트 생성
+        # 텍스트 생성 - 기본 인자만 사용
         response = generator(
             prompt,
             max_length=len(prompt.split()) + max_tokens,
