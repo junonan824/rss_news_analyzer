@@ -72,6 +72,10 @@ rss_news_analyzer/
 │   │   ├── embedding.py
 │   │   └── vector_db.py
 │   │
+│   ├── generation/                   # 텍스트 생성 모듈 (신규)
+│   │   ├── __init__.py
+│   │   └── generation.py
+│   │
 │   ├── knowledge_graph/              # 지식 그래프 모듈
 │   │   ├── __init__.py
 │   │   ├── entity_extractor.py
@@ -164,6 +168,7 @@ rss_news_analyzer/
 
 - **rss_fetch**: RSS 피드에서 데이터를 수집하고 JSON 형식으로 저장
 - **embeddings**: 텍스트 임베딩을 생성하고 ChromaDB에 저장/검색
+- **generation**: OpenAI 또는 Hugging Face 모델을 사용한 텍스트 생성 및 RAG 구현
 - **knowledge_graph**: 개체 추출, 그래프 구축, Neo4j 연동
 - **visualization**: 임베딩 시각화 및 벡터 검색 결과 시각화
 - **utils**: 공통 유틸리티 함수
@@ -193,6 +198,69 @@ python -m src.embeddings.vector_db data/rss_data.json -e data/embeddings.json
 ```bash
 python -m src.embeddings.vector_db data/rss_data.json -q "인공지능 기술 동향" -n 5
 ```
+
+## 텍스트 생성 및 RAG 사용 방법
+
+### 환경 설정
+
+1. `.env.example` 파일을 `.env`로 복사하고 API 키 설정:
+
+```bash
+cp .env.example .env
+# .env 파일을 편집하여 OPENAI_API_KEY 또는 HUGGINGFACE_API_KEY 설정
+```
+
+### 텍스트 생성 (단순 생성)
+
+OpenAI API를 사용한 텍스트 생성:
+
+```bash
+python -m src.cli generate --prompt="인공지능 기술의 최신 트렌드에 대해 설명해주세요."
+```
+
+Hugging Face 모델을 사용한 텍스트 생성:
+
+```bash
+python -m src.cli generate --prompt="인공지능 기술의 최신 트렌드에 대해 설명해주세요." --provider=huggingface --model="google/flan-t5-base"
+```
+
+### RAG (Retrieval-Augmented Generation)
+
+벡터 DB에서 관련 문서를 검색하고 이를 바탕으로 답변을 생성:
+
+```bash
+# 먼저 RSS 데이터를 수집하고 벡터 DB에 저장
+python -m src.main https://news.google.com/rss
+
+# RAG 파이프라인 실행
+python -m src.cli rag --query="우크라이나 전쟁 상황은 어떻게 되고 있나요?"
+```
+
+고급 옵션 사용:
+
+```bash
+python -m src.cli rag --query="최신 기술 트렌드는?" --collection=tech_news --num-results=5 --provider=openai --model=gpt-4
+```
+
+### CLI 옵션 설명
+
+#### 생성 명령 옵션
+- `--prompt`: 생성할 텍스트의 프롬프트 (필수)
+- `--provider`: 사용할 모델 제공자 ('openai' 또는 'huggingface', 기본값: 'openai')
+- `--model`: 사용할 모델 이름 (기본값: .env의 DEFAULT_MODEL 또는 내장 기본값)
+- `--max-tokens`: 생성할 최대 토큰 수 (기본값: 500)
+- `--temperature`: 생성 온도 (기본값: 0.7)
+- `--api-key`: API 키 (설정되지 않은 경우 .env 파일에서 가져옴)
+
+#### RAG 명령 옵션
+- `--query`: 질문 (필수)
+- `--collection`: 검색할 벡터 DB 컬렉션 (기본값: 'rss_articles')
+- `--db-dir`: ChromaDB 디렉토리 경로 (기본값: 'data/chroma_db')
+- `--num-results`: 검색할 문서 수 (기본값: 3)
+- `--provider`: 사용할 모델 제공자 (기본값: 'openai')
+- `--model`: 사용할 모델 이름
+- `--max-tokens`: 생성할 최대 토큰 수 (기본값: 500)
+- `--temperature`: 생성 온도 (기본값: 0.7)
 
 ## 지식 그래프 사용 방법
 
@@ -372,11 +440,6 @@ MATCH (p:PERSON) RETURN p
 
 // 함께 등장한 엔티티 관계 조회
 MATCH (e1)-[r:CO_OCCURS_WITH]->(e2) RETURN e1, r, e2 LIMIT 20
-
-// 가장 많이 언급된 엔티티 찾기
-MATCH (e)<-[r:MENTIONS]-(a) 
-RETURN e.text AS entity, e.type AS type, COUNT(r) AS mentions 
-ORDER BY mentions DESC LIMIT 10
 ```
 
 ### ChromaDB 접속
