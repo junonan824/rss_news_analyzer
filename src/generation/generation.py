@@ -30,6 +30,110 @@ logger = logging.getLogger(__name__)
 DEFAULT_OPENAI_MODEL = "gpt-3.5-turbo"
 DEFAULT_HF_MODEL = "google/flan-t5-base"
 
+class TextGenerator:
+    """텍스트 생성을 위한 클래스"""
+    
+    def __init__(
+        self,
+        provider: str = "openai",
+        model: Optional[str] = None,
+        api_key: Optional[str] = None
+    ):
+        """
+        TextGenerator 초기화
+        
+        Args:
+            provider (str, optional): 사용할 제공자 ("openai" 또는 "huggingface"). 기본값은 "openai".
+            model (str, optional): 사용할 특정 모델. 지정되지 않으면 기본 모델이 사용됩니다.
+            api_key (str, optional): API 키. 지정되지 않으면 환경 변수에서 가져옵니다.
+        """
+        self.provider = provider.lower()
+        
+        # 환경 변수에서 기본값 설정
+        if self.provider == "openai":
+            self.model = model or os.environ.get("DEFAULT_MODEL", DEFAULT_OPENAI_MODEL)
+            self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        else:
+            self.model = model or os.environ.get("DEFAULT_MODEL", DEFAULT_HF_MODEL)
+            self.api_key = api_key or os.environ.get("HUGGINGFACE_API_KEY")
+        
+        # 제공자 유효성 검사
+        if self.provider not in ["openai", "huggingface"]:
+            logger.warning(f"지원되지 않는 제공자: {self.provider}. 'openai'로 기본 설정됩니다.")
+            self.provider = "openai"
+        
+        # 라이브러리 사용 가능 여부 확인
+        if self.provider == "openai" and not OPENAI_AVAILABLE:
+            logger.warning("OpenAI 패키지가 설치되지 않았습니다. 'pip install openai'를 실행하세요.")
+        elif self.provider == "huggingface" and not HUGGINGFACE_AVAILABLE:
+            logger.warning("Transformers 패키지가 설치되지 않았습니다. 'pip install transformers torch'를 실행하세요.")
+    
+    def generate_text(
+        self,
+        prompt: str,
+        max_tokens: int = 500,
+        temperature: float = 0.7,
+        **kwargs
+    ) -> str:
+        """
+        제공된 프롬프트를 바탕으로 텍스트를 생성합니다.
+
+        Args:
+            prompt (str): 생성을 위한 프롬프트/질문
+            max_tokens (int, optional): 생성할 최대 토큰 수. 기본값은 500.
+            temperature (float, optional): 온도 파라미터 (높을수록 더 창의적). 기본값은 0.7.
+            **kwargs: 추가 모델별 파라미터
+
+        Returns:
+            str: 생성된 텍스트
+        """
+        # API 키가 없으면 kwargs에서 가져옴
+        api_key = self.api_key or kwargs.get("api_key")
+        
+        # 필요한 경우 provider와 model 오버라이드
+        provider = kwargs.get("provider", self.provider)
+        model = kwargs.get("model", self.model)
+        
+        if provider == "openai":
+            return _generate_with_openai(prompt, model, max_tokens, temperature, api_key=api_key, **kwargs)
+        elif provider == "huggingface":
+            return _generate_with_huggingface(prompt, model, max_tokens, temperature, **kwargs)
+        else:
+            raise ValueError(f"지원되지 않는 제공자: {provider}. 'openai' 또는 'huggingface'를 사용하세요.")
+    
+    def generate_with_retrieved_context(
+        self,
+        query: str,
+        contexts: List[str],
+        max_tokens: int = 500,
+        temperature: float = 0.7,
+        **kwargs
+    ) -> str:
+        """
+        검색된 컨텍스트를 바탕으로 RAG(Retrieval-Augmented Generation)를 수행합니다.
+
+        Args:
+            query (str): 사용자 질문
+            contexts (List[str]): 검색된 관련 문서/컨텍스트 목록
+            max_tokens (int, optional): 생성할 최대 토큰 수. 기본값은 500.
+            temperature (float, optional): 온도 파라미터 (높을수록 더 창의적). 기본값은 0.7.
+            **kwargs: 추가 모델별 파라미터
+
+        Returns:
+            str: 생성된 텍스트
+        """
+        # 검색된 컨텍스트를 바탕으로 프롬프트 생성
+        prompt = _create_rag_prompt(query, contexts)
+        
+        # 텍스트 생성
+        return self.generate_text(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs
+        )
+
+# 기존 함수들 유지 (외부 호환성을 위해)
 def generate_text(
     prompt: str,
     provider: str = "openai",

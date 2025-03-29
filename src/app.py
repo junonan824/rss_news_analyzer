@@ -7,9 +7,12 @@ RSS 뉴스 분석기 API
 
 import os
 import json
+import uuid
 from typing import List, Optional, Dict, Any
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect, Depends, status
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, HttpUrl
 
 from src.rss_fetch.rss_fetch import process_rss_feed
@@ -20,6 +23,11 @@ from src.knowledge_graph.graph_builder import KnowledgeGraph
 from src.knowledge_graph.neo4j_adapter import Neo4jAdapter
 from src.generation.generation import generate_text, generate_text_with_retrieved_context
 
+# 채팅 모듈 임포트
+from src.chat.chat_session import ChatSessionManager
+from src.chat.message_handler import MessageHandler
+from src.chat.storage import SQLiteStorage
+
 # FastAPI 애플리케이션 생성
 app = FastAPI(
     title="RSS 뉴스 분석기 API",
@@ -27,15 +35,56 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# CORS 미들웨어 설정
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 실제 배포 시에는 구체적인 오리진 설정 필요
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 정적 파일 마운트
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 # 데이터 경로 설정
 DATA_DIR = "data/api"
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# 채팅 저장소 디렉토리 설정
+CHAT_DB_PATH = "data/chat_sessions.db"
+os.makedirs(os.path.dirname(CHAT_DB_PATH), exist_ok=True)
 
 # 글로벌 변수 - 현재 로드된 데이터 상태 관리
 current_feed = None
 vector_db = None
 knowledge_graph = None
 neo4j_adapter = None
+
+# 채팅 세션 관리자 및 메시지 핸들러 초기화
+chat_session_manager = ChatSessionManager()
+chat_storage = SQLiteStorage(db_path=CHAT_DB_PATH)
+message_handler = None
+
+# 애플리케이션 시작 시 세션 로드
+@app.on_event("startup")
+async def startup_event():
+    global message_handler
+    
+    # 세션 로드
+    chat_session_manager.load_sessions(chat_storage)
+    
+    # 메시지 핸들러 초기화
+    message_handler = MessageHandler(collection_name="rss_articles")
+    
+    print("Chat system initialized")
+
+# 애플리케이션 종료 시 세션 저장
+@app.on_event("shutdown")
+async def shutdown_event():
+    # 모든 세션 저장
+    chat_session_manager.save_sessions(chat_storage)
+    print("Chat sessions saved")
 
 # 모델 정의
 class FeedProcessRequest(BaseModel):
@@ -79,6 +128,16 @@ class GenerateSummaryRequest(BaseModel):
     model: Optional[str] = None
     max_tokens: int = 500
     temperature: float = 0.7
+
+# 채팅 관련 모델
+class ChatMessage(BaseModel):
+    content: str
+    session_id: Optional[str] = None
+
+class ChatResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: str
 
 # 백그라운드 작업
 async def process_feed_background(url: str, collection_name: str, ner_model: str, build_graph: bool, 
@@ -407,6 +466,211 @@ async def generate_summary_of_search(request: GenerateSummaryRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"요약 생성 중 오류 발생: {str(e)}")
+
+# 채팅 관련 REST API 엔드포인트
+@app.post("/chat/send")
+async def send_chat_message(request: ChatMessage):
+    """
+    채팅 메시지 전송 (REST API)
+    """
+    global message_handler
+    
+    # 세션 ID가 없으면 새로 생성
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    # 세션 가져오기 또는 생성
+    session = chat_session_manager.get_session(session_id)
+    if not session:
+        session = chat_session_manager.create_session(session_id)
+    
+    # 메시지 처리
+    try:
+        response = await chat_session_manager.process_message(
+            session_id, request.content, message_handler
+        )
+        
+        # 세션 저장
+        chat_storage.save_session(session)
+        
+        return {
+            "success": True,
+            "message": response,
+            "session_id": session_id
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"메시지 처리 오류: {str(e)}",
+            "session_id": session_id
+        }
+
+@app.get("/chat/sessions")
+async def get_chat_sessions():
+    """
+    모든 채팅 세션 목록 조회
+    """
+    sessions = []
+    
+    # 모든 세션 가져오기
+    for session_id, session in chat_session_manager.sessions.items():
+        sessions.append({
+            "session_id": session_id,
+            "created_at": session.created_at.isoformat(),
+            "last_active": session.last_active.isoformat(),
+            "message_count": len(session.messages)
+        })
+    
+    return {"sessions": sessions}
+
+@app.get("/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str):
+    """
+    특정 채팅 세션 내용 조회
+    """
+    session = chat_session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"세션 ID {session_id}를 찾을 수 없습니다."
+        )
+    
+    # 세션 정보 반환
+    return {
+        "session_id": session_id,
+        "created_at": session.created_at.isoformat(),
+        "last_active": session.last_active.isoformat(),
+        "messages": [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.isoformat()
+            }
+            for msg in session.messages
+        ]
+    }
+
+@app.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str):
+    """
+    특정 채팅 세션 삭제
+    """
+    session = chat_session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=404,
+            detail=f"세션 ID {session_id}를 찾을 수 없습니다."
+        )
+    
+    # 세션 삭제
+    chat_storage.delete_session(session_id)
+    
+    # 세션 관리자에서 제거
+    chat_session_manager.sessions.pop(session_id, None)
+    
+    return {"success": True, "message": f"세션 {session_id}가 삭제되었습니다."}
+
+# WebSocket 채팅 엔드포인트
+@app.websocket("/ws/chat/{session_id}")
+async def websocket_chat_endpoint(websocket: WebSocket, session_id: str):
+    """
+    WebSocket 기반 채팅 엔드포인트
+    """
+    global message_handler
+    
+    # 연결 승인
+    await chat_session_manager.connect(session_id, websocket)
+    
+    try:
+        # 환영 메시지 전송
+        await websocket.send_json({
+            "type": "system",
+            "content": "RSS 뉴스 분석기 채팅 시스템에 연결되었습니다.",
+            "session_id": session_id
+        })
+        
+        # 메시지 수신 대기
+        while True:
+            # 메시지 수신
+            data = await websocket.receive_text()
+            
+            try:
+                # JSON 형식인지 확인
+                msg_data = json.loads(data)
+                content = msg_data.get("content", "")
+            except:
+                # JSON이 아니면 텍스트 자체를 컨텐츠로 사용
+                content = data
+            
+            # 빈 메시지 무시
+            if not content.strip():
+                await websocket.send_json({
+                    "type": "error",
+                    "content": "빈 메시지는 처리할 수 없습니다.",
+                    "session_id": session_id
+                })
+                continue
+            
+            # 메시지 처리 시작 알림
+            await websocket.send_json({
+                "type": "status",
+                "content": "메시지 처리 중...",
+                "session_id": session_id
+            })
+            
+            try:
+                # 응답 생성
+                response = await chat_session_manager.process_message(
+                    session_id, content, message_handler
+                )
+                
+                # 세션 저장
+                session = chat_session_manager.get_session(session_id)
+                chat_storage.save_session(session)
+                
+                # 응답 전송
+                await websocket.send_json({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": response,
+                    "session_id": session_id,
+                    "timestamp": session.last_active.isoformat()
+                })
+            
+            except Exception as e:
+                # 오류 응답
+                await websocket.send_json({
+                    "type": "error",
+                    "content": f"메시지 처리 중 오류 발생: {str(e)}",
+                    "session_id": session_id
+                })
+    
+    except WebSocketDisconnect:
+        # 연결 종료 시 정리
+        chat_session_manager.disconnect(session_id)
+        print(f"Client disconnected: {session_id}")
+    
+    except Exception as e:
+        # 예외 발생 시 정리
+        chat_session_manager.disconnect(session_id)
+        print(f"WebSocket error: {str(e)}")
+
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_ui():
+    """채팅 UI 페이지"""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    chat_html_path = os.path.join(project_root, "static/chat.html")
+    
+    try:
+        with open(chat_html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        logger.error(f"채팅 UI 파일을 찾을 수 없습니다: {chat_html_path}")
+        return HTMLResponse(content="<h1>Chat UI is not available</h1><p>File not found</p>")
+    except Exception as e:
+        logger.error(f"채팅 UI 로드 중 오류 발생: {str(e)}")
+        return HTMLResponse(content=f"<h1>Error loading chat UI</h1><p>{str(e)}</p>")
 
 # 서버 실행 코드
 if __name__ == "__main__":
