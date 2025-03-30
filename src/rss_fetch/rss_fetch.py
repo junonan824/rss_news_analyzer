@@ -145,6 +145,11 @@ KEYWORD_TO_CATEGORY = {
     "홍수": "korean_disaster",
     "산불": "korean_disaster",
     
+    # 특정 지역 키워드
+    "인도네시아": "disaster",
+    "수마트라": "disaster",
+    "자바": "disaster",
+    
     # 일반 뉴스
     "news": "news",
     "뉴스": "korean",
@@ -164,6 +169,22 @@ def find_relevant_rss_feeds(query: str) -> List[str]:
     relevant_feeds = []
     query_lower = query.lower()
     matched_categories = set()
+    
+    # 한국어 -> 영어 키워드 번역 매핑
+    kr_to_en_mapping = {
+        "인도네시아": "indonesia",
+        "지진": "earthquake",
+        "태풍": "typhoon",
+        "홍수": "flood",
+        "재난": "disaster",
+        "뉴스": "news"
+    }
+    
+    # 영어 검색어 생성
+    english_query = query_lower
+    for kr_word, en_word in kr_to_en_mapping.items():
+        if kr_word in query_lower:
+            english_query = english_query.replace(kr_word, en_word)
     
     # 1. 키워드 매칭으로 카테고리 찾기
     for keyword, category in KEYWORD_TO_CATEGORY.items():
@@ -189,7 +210,13 @@ def find_relevant_rss_feeds(query: str) -> List[str]:
         google_news_feed_ko = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         relevant_feeds.append(google_news_feed_ko)
     
-    # 4. 최종 피드 반환 (중복 제거)
+    # 4. 한국어 키워드를 영어로 변환한 검색 쿼리 추가
+    if english_query != query_lower:
+        encoded_en_query = requests.utils.quote(english_query)
+        google_news_feed_en = f"https://news.google.com/rss/search?q={encoded_en_query}&hl=en-US&gl=US&ceid=US:en"
+        relevant_feeds.append(google_news_feed_en)
+    
+    # 5. 최종 피드 반환 (중복 제거)
     return list(set(relevant_feeds))
 
 def _extract_content_with_newspaper(url: str) -> Tuple[str, str, Dict]:

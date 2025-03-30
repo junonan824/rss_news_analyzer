@@ -24,7 +24,7 @@ import tempfile
 logger = logging.getLogger(__name__)
 
 # 유사도 임계값 및 최소 문서 수 설정
-SIMILARITY_THRESHOLD = 30.0
+SIMILARITY_THRESHOLD = 15.0
 MIN_DOCUMENTS_REQUIRED = 1
 
 class MessageHandler:
@@ -109,7 +109,7 @@ class MessageHandler:
                 logger.info(f"유사도 점수: {distances}")
                 
                 # 유사도 점수 확인 - 너무 낮으면 새 데이터 가져오기
-                has_high_quality_results = any(1.0/dist < SIMILARITY_THRESHOLD for dist in distances)
+                has_high_quality_results = any(distance < (1.0/SIMILARITY_THRESHOLD) for distance in distances)
                 if doc_count < MIN_DOCUMENTS_REQUIRED or not has_high_quality_results:
                     logger.info(f"검색 결과 품질이 낮음, 새로운 RSS 피드 가져오기")
                     
@@ -222,10 +222,23 @@ class MessageHandler:
         # 관련 엔티티 추출
         entities = self.context_manager.extract_entities_from_context(context)
         
+        # 특정 키워드가 포함된 경우 관련 키워드 추가
+        specific_keywords = {
+            "인도네시아": ["indonesia", "earthquake", "sumatra", "java"],
+            "지진": ["earthquake", "tremor", "seismic", "magnitude"],
+            "태풍": ["typhoon", "hurricane", "storm"],
+            "홍수": ["flood", "flooding", "inundation"],
+        }
+        
+        additional_keywords = []
+        for keyword, related in specific_keywords.items():
+            if keyword.lower() in message.lower():
+                additional_keywords.extend(related)
+        
         # 중요 엔티티가 있으면 원본 쿼리에 추가
-        if entities:
-            top_entities = entities[:3]  # 최대 3개만 사용
-            enhanced_query = f"{message} {' '.join(top_entities)}"
+        if entities or additional_keywords:
+            top_entities = entities[:3] if entities else []  # 최대 3개만 사용
+            enhanced_query = f"{message} {' '.join(top_entities)} {' '.join(additional_keywords)}"
             logger.debug(f"Enhanced query: {enhanced_query} (original: {message})")
             return enhanced_query
         
